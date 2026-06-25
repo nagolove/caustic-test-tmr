@@ -326,6 +326,75 @@ static MunitResult test_tmr_end_expired(const MunitParameter p[], void *data) {
 	return MUNIT_OK;
 }
 
+// --- частотный тест: плотный опрос таймера в цикле ---
+
+static MunitResult test_tmr_frequency(const MunitParameter p[], void *data) {
+	(void)p; (void)data;
+	Tmr t;
+	tmr_null(&t);
+	t.period = 1.0f / 60.0f; // 60hz
+	tmr_init(&t);
+
+	const double duration = 0.2;
+	const double start = tmr_now();
+	int ticks = 0;
+	double last_tick = -1.0; // время предыдущего срабатывания
+
+	// плотный опрос, как реальный кадровый цикл
+	while (tmr_now() - start < duration) {
+		if (tmr_begin(&t)) {
+			double now = tmr_now();
+			// интервал между тиками не меньше периода (нет двойных тиков)
+			if (last_tick >= 0.0)
+				munit_assert_double(now - last_tick, >=, t.period * 0.9);
+			last_tick = now;
+			ticks++;
+			tmr_end(&t);
+		}
+	}
+
+	// ожидаем ~ duration / period тиков; дрейф якоря тянет число вниз
+	int expected = (int)(duration / t.period); // ~12
+	munit_assert_int(ticks, >=, expected - 2);
+	munit_assert_int(ticks, <=, expected + 1);
+
+	return MUNIT_OK;
+}
+
+// --- частотный тест с time_loop: тики + завершение по окончании окна ---
+
+static MunitResult test_tmr_frequency_loop(const MunitParameter p[], void *data) {
+	(void)p; (void)data;
+	Tmr t;
+	tmr_null(&t);
+	t.period = 1.0f / 60.0f; // 60hz
+	t.time_loop = 0.2f;      // окно жизни таймера
+	tmr_init(&t);
+
+	const double guard = 0.4; // защита от зависания цикла
+	const double start = tmr_now();
+	int ticks = 0;
+
+	// крутим, пока таймер не истечёт (или не сработает защита)
+	while (!t.expired && tmr_now() - start < guard) {
+		if (tmr_begin(&t)) {
+			ticks++;
+			tmr_end(&t);
+		}
+	}
+
+	// за время time_loop при 60hz должно пройти ~ time_loop / period тиков
+	int expected = (int)(t.time_loop / t.period); // ~12
+	munit_assert_int(ticks, >=, expected - 2);
+	munit_assert_int(ticks, <=, expected + 1);
+
+	// по окончании окна — истёк и amount доведён до 1.0
+	munit_assert(t.expired);
+	munit_assert_float(t.time_amount, ==, 1.0f);
+
+	return MUNIT_OK;
+}
+
 // --- набор тестов ---
 
 static MunitTest tmr_tests[] = {
@@ -343,6 +412,8 @@ static MunitTest tmr_tests[] = {
 	{ (char*) "/once_with_loop",   test_tmr_once_with_loop,   NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 	{ (char*) "/end_before_start", test_tmr_end_before_start, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 	{ (char*) "/end_expired",      test_tmr_end_expired,      NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+	{ (char*) "/frequency",        test_tmr_frequency,        NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+	{ (char*) "/frequency_loop",   test_tmr_frequency_loop,   NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 	{ NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL }
 };
 
