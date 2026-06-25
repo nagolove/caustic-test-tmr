@@ -1,0 +1,8 @@
+/caustic-test-tmr
+/obj_linux/
+/obj_wasm/
+/obj_win/
+*.o
+compile_flags.txt
+cache.lua
+bld.lua
